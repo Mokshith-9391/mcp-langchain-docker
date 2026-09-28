@@ -1,0 +1,9 @@
+# Never bake secrets into the image — .env is passed at runtime by compose
+.env
+.git
+.venv
+venv
+__pycache__
+*.pyc
+deploy/
+README.md

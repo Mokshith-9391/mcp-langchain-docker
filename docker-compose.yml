@@ -1,0 +1,92 @@
+# =============================================================
+#  MCP + LangChain on Docker
+#
+#   docker compose up -d --build      # start the 3 MCP servers
+#   docker compose run --rm agent     # chat with the agent
+#
+#  Network layout (private bridge network "mcp-net"):
+#     agent ──▶ http://weather:8001/mcp
+#           ──▶ http://jira:8002/mcp
+#           ──▶ http://ec2:8003/mcp
+#  Ports are also published on 127.0.0.1 only (host debugging),
+#  never on 0.0.0.0 — nothing is exposed to the internet.
+# =============================================================
+
+x-app: &app
+  build: .
+  image: mcp-langchain-app:latest
+  env_file: .env
+  restart: unless-stopped
+  networks: [mcp-net]
+
+services:
+  weather:
+    <<: *app
+    container_name: mcp-weather
+    command: ["python", "servers/weather_server.py"]
+    environment:
+      MCP_HOST: 0.0.0.0
+      WEATHER_PORT: "8001"
+    ports:
+      - "127.0.0.1:8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8001), 2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  jira:
+    <<: *app
+    container_name: mcp-jira
+    command: ["python", "servers/jira_server.py"]
+    environment:
+      MCP_HOST: 0.0.0.0
+      JIRA_PORT: "8002"
+    ports:
+      - "127.0.0.1:8002:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8002), 2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  ec2:
+    <<: *app
+    container_name: mcp-ec2
+    command: ["python", "servers/ec2_server.py"]
+    environment:
+      MCP_HOST: 0.0.0.0
+      EC2_PORT: "8003"
+    ports:
+      - "127.0.0.1:8003:8003"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8003), 2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # The agent is interactive, so it is NOT started by `up -d`.
+  # Run it on demand:  docker compose run --rm agent
+  agent:
+    <<: *app
+    container_name: mcp-agent
+    restart: "no"
+    profiles: ["cli"]
+    command: ["python", "agent/agent.py"]
+    stdin_open: true
+    tty: true
+    environment:
+      WEATHER_MCP_URL: http://weather:8001/mcp
+      JIRA_MCP_URL: http://jira:8002/mcp
+      EC2_MCP_URL: http://ec2:8003/mcp
+    depends_on:
+      weather: { condition: service_healthy }
+      jira:    { condition: service_healthy }
+      ec2:     { condition: service_healthy }
+
+networks:
+  mcp-net:
+    name: mcp-net
